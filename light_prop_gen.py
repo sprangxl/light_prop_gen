@@ -33,7 +33,7 @@ def light_prop_gen():
     lum_max = intensity_max * del_t  # V/m^2 or Ws/m^2
 
     # create source field
-    field_s1, xc_s1 = source_field(n_s1, x_s1, zo, lum_max)
+    field_s1, xc_s1, scene_info = source_field(n_s1, x_s1, zo, lum_max)
 
     # propagate source field to front of telescope
     field_r1, xr1_crd, phsc_r1 = rayleigh_sommerfeld_prop(field_s1, lam, zo, xc_s1, n_r1, x_r1, 0, 0)
@@ -41,11 +41,10 @@ def light_prop_gen():
     # phase screen
     zern_mx = 100  # max number of zernikes used in screen
     ro = 0.1  # seeing parameter
-    windx = 1
-    windy = 1
-    boil = 1
-    del_t = .1
-    scrn_scale_fac = 0.002
+    windx = 1  # wind velocity x direction
+    windy = 1  # wind velocit y direction
+    boil = 1  # atmospheric boil factor
+    scrn_scale_fac = 0.002  # scaling factor on atmospheric impact
 
     # add atmospheric phase noise to the recieve plane
     screen, zern_phs = zern_phase_scrn(ro, outer_d, n_r1, zern_mx, xr1_crd, windx, windy, boil, del_t)
@@ -84,17 +83,17 @@ def light_prop_gen():
     # sample region on the ccd array
     sens_crdx = np.linspace(-sens_w / 2, sens_w / 2, n_sensx)
     sens_crdy = np.linspace(-sens_h / 2, sens_h / 2, n_sensy)
-    data = sample(field_r4, xr4_crd, sens_crdx, sens_crdy)
+    data_sampled = sample(field_r4, xr4_crd, sens_crdx, sens_crdy)
 
     # add detector noise (thermal and photon counting) to the system
     eff = 0.53  # quantum efficiency
     temp = 300  # temperature (K)
-    cap = 1e-12  # circuit capacitence (F)
+    cap = 1e-12  # circuit capacitance (F)
     i_dark = 9.4 * qe
 
     thermal = np.sqrt(kb * temp * cap / qe ** 2)  # thermal noise
-    data_signal = (data * (pix_sz ** 2) * del_t) / (h * c / lam)  # field (V/m^2) to photons
-    background = np.max(np.max(data_signal))  # background noise
+    data_signal = (data_sampled * (pix_sz ** 2) * del_t) / (h * c / lam)  # field (V/m^2) to photons
+    background = lum_max * del_t / (h * c / lam)   # background noise
 
     thermal_rv = np.random.normal(0, thermal, size=[n_sensy, n_sensx])
     data_signal_rv = np.random.poisson(eff * data_signal)
@@ -104,18 +103,32 @@ def light_prop_gen():
 
     print('time: ', (time.time() - start_time))
 
-    scx_min = np.min(sens_crdx)
-    scx_max = np.max(sens_crdx)
-    scy_min = np.min(sens_crdy)
-    scy_max = np.max(sens_crdy)
+    data = partition_image(data_noisey, n_sensx, n_sensy, np.max(xr4_crd)/sens_w, np.max(xr4_crd)/sens_h)
+    labels = scene_info
 
     # plot final propagation when true
     if True:
-        fig, ax = plt.subplots(1, 2)
-        ax[0].imshow(field_s1)
-        ax[0].set(xlabel='original scene')
-        ax[1].imshow(data_noisey, extent=[scx_min, scx_max, scy_max, scy_min])
-        ax[1].set(xlabel='generated image')
+        plt.subplot(121)
+        plt.imshow(field_s1)
+        plt.title('original')
+        plt.axis('off')
+        plt.subplot(243)
+        plt.imshow(data[0])
+        plt.title('n:%1.0f, %1.1f, %1.1f' % (labels[0, 0], labels[0, 1]/lum_max, labels[0, 2]/lum_max))
+        plt.axis('off')
+        plt.subplot(244)
+        plt.imshow(data[1])
+        plt.title('n:%1.0f, %1.1f, %1.1f' % (labels[1, 0], labels[1, 1]/lum_max, labels[1, 2]/lum_max))
+        plt.axis('off')
+        plt.subplot(247)
+        plt.imshow(data[2])
+        plt.title('n:%1.0f, %1.1f, %1.1f' % (labels[2, 0], labels[2, 1]/lum_max, labels[2, 2]/lum_max))
+        plt.axis('off')
+        plt.subplot(248)
+        plt.imshow(data[3])
+        plt.title('n:%1.0f, %1.1f, %1.1f' % (labels[3, 0], labels[3, 1]/lum_max, labels[3, 2]/lum_max))
+        plt.axis('off')
+        plt.tight_layout()
         plt.show()
 
     print('done')
@@ -127,7 +140,7 @@ def source_field(n, sz, z, lu):
     xm, ym = np.meshgrid(x, x)
     field_s = np.zeros((n + 1, n + 1))
 
-    lumin = np.random.uniform(0, lu, size=(2, 2, 2))
+    lumin = np.random.uniform(lu/10, lu, size=(2, 2, 2))
     num_obj = np.random.randint(0, 3, size=(2, 2))
 
     for ii in range(2):
@@ -143,7 +156,8 @@ def source_field(n, sz, z, lu):
                 field_s[int((3**ii) * n / 4), int((3**jj) * n / 4)] = lumin[ii, jj, 0]
                 field_s[int(((3**ii) * n) / 4), int(((3**jj) * n) / 4) + 1] = lumin[ii, jj, 1]
 
-    return field_s, x
+    scene_info = np.concatenate((num_obj.reshape(4, 1), lumin.reshape(4, 2)), 1)
+    return field_s, x, scene_info
 
 
 # 11" (28cm) circle with 3.75" (9.5cm) center circle missing
@@ -271,6 +285,7 @@ def zern_poly(i_mx, num_pts):
     thm = np.arctan2(ym, xm)
 
     zern_idx = zern_indexes()
+    if i_mx>1000: print('error: too many zernike polynomials requests')
     zern_idx = zern_idx[0:i_mx - 1, :]
 
     zern = np.zeros((int(i_mx), int(num_pts + 1), int(num_pts + 1)))
@@ -293,9 +308,9 @@ def zern_poly(i_mx, num_pts):
 
 # generate indices for creating zernike polynomials
 def zern_indexes():
-    raw = csv.DictReader(open('zernikes.csv'))
+    raw = csv.DictReader(open('zern_idx.csv'))
     raw_list = list(raw)
-    r = 200
+    r = 1000
     c = 3
     z = np.zeros((r, c))
     for row in np.arange(0, r):
@@ -413,6 +428,21 @@ def rayleigh_sommerfeld_prop(field_s, lam, zo, xs_crd, n_r, sz_r, xc, yc):
 
     print("rs prop")
     return field_r, xr_crd, phs_center
+
+
+# partition image into four snippets
+def partition_image(image, nx, ny, rx, ry):
+    xpart = [int((nx/2) - (nx*rx)), int(nx/2), int((nx/2) + (nx*rx))]
+    ypart = [int((ny/2) - (ny*ry)), int(ny/2), int((ny/2) + (ny*ry))]
+
+    temp1 = image[ypart[1]:ypart[2], xpart[1]:xpart[2]]
+    temp2 = image[ypart[1]:ypart[2], xpart[0]:xpart[1]]
+    temp3 = image[ypart[0]:ypart[1], xpart[1]:xpart[2]]
+    temp4 = image[ypart[0]:ypart[1], xpart[0]:xpart[1]]
+
+    im_parts = [temp1, temp2, temp3, temp4]
+    print('partitioned image')
+    return im_parts
 
 
 if __name__ == '__main__':
