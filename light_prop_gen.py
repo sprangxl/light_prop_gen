@@ -10,33 +10,28 @@ import time
 def light_prop_gen():
     start_time = time.time()
 
+    # constants
     c = 2.9979e8
     h = 6.626e-34
     qe = 1.6022e-19
     kb = 1.38065e-34
 
+    # scene information
     lam = 529e-9  # optimal wavelength of camera (m)
     zo = 35786e3  # geosynch (m)
     x_s1 = 6e3  # edge length of source field (m)
     n_s1 = 30  # number of samples along 1D source plane
     x_r1 = 0.3  # edge length of receive field (m)
     n_r1 = 120  # number of samples along 1D receive plane
+    del_t = .1  # exposure time
+    intensity_max = 1e-11  # max target intensity (W/m^2)
+    lum_max = intensity_max * del_t  # V/m^2 or Ws/m^2
 
+    # optic information
     fl = 2.8  # focal length (m)
     lens_d = 0.280  # lense diameter (m)
     outer_d = 0.280  # outer diameter of telescope (m)
     inner_d = 0.095  # inner diameter of mask due to subreflector (m)
-
-    del_t = .1  # exposure time
-    intensity_max = 1e-11  # max target intensity (W/m^2)
-
-    lum_max = intensity_max * del_t  # V/m^2 or Ws/m^2
-
-    # create source field
-    field_s1, xc_s1, scene_info = source_field(n_s1, x_s1, zo, lum_max)
-
-    # propagate source field to front of telescope
-    field_r1, xr1_crd, phsc_r1 = rayleigh_sommerfeld_prop(field_s1, lam, zo, xc_s1, n_r1, x_r1, 0, 0)
 
     # phase screen
     zern_mx = 100  # max number of zernikes used in screen
@@ -46,9 +41,28 @@ def light_prop_gen():
     boil = 1  # atmospheric boil factor
     scrn_scale_fac = 0.002  # scaling factor on atmospheric impact
 
+    # focal plane array (sensor) parameters
+    n_sensx = 2448  # number of fpa pixels, x
+    n_sensy = 2050  # number of fpa pixels, y
+    sens_w = 9.93e-3  # fpa width
+    sens_h = 8.7e-3  # fpa height
+    pix_sz = 3.45e-6  # pixel size of photodetector
+
+    # detector noise information (thermal and photon counting) to the system
+    eff = 0.53  # quantum efficiency
+    temp = 300  # temperature (K)
+    cap = 1e-12  # circuit capacitance (F)
+    i_dark = 9.4 * qe
+
+    # create source field
+    field_s1, xc_s1, scene_info = source_field(n_s1, x_s1, zo, lum_max)
+
+    # propagate source field to front of telescope
+    field_r1, xr1_crd, phsc_r1 = rayleigh_sommerfeld_prop(field_s1, lam, zo, xc_s1, n_r1, x_r1, 0, 0)
+
     # add atmospheric phase noise to the recieve plane
     screen, zern_phs = zern_phase_scrn(ro, outer_d, n_r1, zern_mx, xr1_crd, windx, windy, boil, del_t)
-    field_r1_atm = field_r1 * np.exp(1j * 2 * np.pi * (lam * c) * scrn_scale_fac * zern_phs)
+    field_r1_atm = field_r1 * np.exp(1j * 2 * np.pi * (lam * c) * scrn_scale_fac * screen)
 
     # add a mask depicting the telescope front-end
     mask_n = n_r1
@@ -68,13 +82,6 @@ def light_prop_gen():
         xr3_crd = xr1_crd
         d_r3 = x_r1 / 2 / n_r1
 
-    # focal plane array (sensor) parameters
-    n_sensx = 2448  # number of fpa pixels, x
-    n_sensy = 2050  # number of fpa pixels, y
-    sens_w = 9.93e-3  # fpa width
-    sens_h = 8.7e-3  # fpa height
-    pix_sz = 3.45e-6  # pixel size of photodetector
-
     # focus field based on effective lense focal length, turns fresnel into fraunhofer of distance fl
     mask2 = circ_mask(mask_n, mask_sz, lens_d, 0)
     field_s3 = field_r3 * mask2
@@ -85,12 +92,7 @@ def light_prop_gen():
     sens_crdy = np.linspace(-sens_h / 2, sens_h / 2, n_sensy)
     data_sampled = sample(field_r4, xr4_crd, sens_crdx, sens_crdy)
 
-    # add detector noise (thermal and photon counting) to the system
-    eff = 0.53  # quantum efficiency
-    temp = 300  # temperature (K)
-    cap = 1e-12  # circuit capacitance (F)
-    i_dark = 9.4 * qe
-
+    # add detector noise from circuit and scene
     thermal = np.sqrt(kb * temp * cap / qe ** 2)  # thermal noise
     data_signal = (data_sampled * (pix_sz ** 2) * del_t) / (h * c / lam)  # field (V/m^2) to photons
     background = lum_max * del_t / (h * c / lam)   # background noise
@@ -101,13 +103,18 @@ def light_prop_gen():
 
     data_noisey = data_signal_rv + thermal_rv + background_rv
 
+    # output time for simulation instance
     print('time: ', (time.time() - start_time))
 
-    data = partition_image(data_noisey, n_sensx, n_sensy, np.max(xr4_crd)/sens_w, np.max(xr4_crd)/sens_h)
+    # save off data when true
+    data = partition_image(data_noisey, n_sensx, n_sensy, np.max(xr4_crd) / sens_w, np.max(xr4_crd) / sens_h)
     labels = scene_info
+    if True:
+        save_file('light_prop_data_array.npy', data)
+        save_file('light_prop_label_array.npy', labels[:, 0])
 
     # plot final propagation when true
-    if True:
+    if False:
         plt.subplot(121)
         plt.imshow(field_s1)
         plt.title('original')
@@ -186,7 +193,7 @@ def sq_mask(n, sz, x_diam, y_diam):
     return mask
 
 
-# 8MP focal plane array
+# resample to focal plane array
 def sample(field_s, xs_crd, sampx, sampy):
     # determine magnitude of source field
     field_s_mag = np.sqrt(np.real(field_s) ** 2 + np.imag(field_s) ** 2)
@@ -197,6 +204,7 @@ def sample(field_s, xs_crd, sampx, sampy):
     return field_rs(sampx, sampy)
 
 
+# create phase screen from zernike polynomials
 def zern_phase_scrn(ro, d, nn, zern_mx, x_crd, windx, windy, boil, deltat):
     k = 2.2698
     a = 6.88
@@ -445,5 +453,18 @@ def partition_image(image, nx, ny, rx, ry):
     return im_parts
 
 
+# save data to file for later use
+def save_file(filename, data):
+    import os
+    if os.path.isfile(filename):
+        d_handle = np.load(filename, allow_pickle=True)
+        np.save(filename, np.append(d_handle, data))
+    else:
+        np.save(filename, data)
+
+    print('saved data')
+
+
 if __name__ == '__main__':
-    light_prop_gen()
+    for i in range(1):
+        light_prop_gen()
