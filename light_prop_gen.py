@@ -3,18 +3,25 @@ import matplotlib.pyplot as plt
 import math
 import scipy.interpolate as itrp
 import scipy.linalg as la
+from scipy import signal
 import csv
 import time
 
 
 def light_prop_gen():
+    # code flags
+    save_flag = False
+    plot_flag = True
+    barrel_prop_flag = False
+
+    # start clock for running simulation instance
     start_time = time.time()
 
     # constants
-    c = 2.9979e8
-    h = 6.626e-34
-    qe = 1.6022e-19
-    kb = 1.38065e-34
+    c = 2.9979e8  # celeritas
+    h = 6.626e-34  # planck's constant
+    qe = 1.6022e-19  # elementary charge
+    kb = 1.38065e-34  # boltzmann's constant
 
     # scene information
     lam = 529e-9  # optimal wavelength of camera (m)
@@ -23,9 +30,10 @@ def light_prop_gen():
     n_s1 = 30  # number of samples along 1D source plane
     x_r1 = 0.3  # edge length of receive field (m)
     n_r1 = 120  # number of samples along 1D receive plane
-    del_t = .1  # exposure time
-    intensity_max = 1e-11  # max target intensity (W/m^2)
+    del_t = .0001  # exposure time
+    intensity_max = 1e-5  # max target intensity (W/m^2)
     lum_max = intensity_max * del_t  # V/m^2 or Ws/m^2
+    back_lum_mean = lum_max/10  # mean background luminosity
 
     # optic information
     fl = 2.8  # focal length (m)
@@ -34,12 +42,12 @@ def light_prop_gen():
     inner_d = 0.095  # inner diameter of mask due to subreflector (m)
 
     # phase screen
-    zern_mx = 100  # max number of zernikes used in screen
-    ro = 0.1  # seeing parameter
+    zern_mx = 120  # max number of zernikes used in screen
+    ro = 0.07  # seeing parameter in (m) (generally between 0.01 & 0.20 m, 0.056 gives D/ro=5)
     windx = 1  # wind velocity x direction
     windy = 1  # wind velocit y direction
     boil = 1  # atmospheric boil factor
-    scrn_scale_fac = 0.002  # scaling factor on atmospheric impact
+    scrn_scale_fac = 0.003  # scaling factor on atmospheric impact
 
     # focal plane array (sensor) parameters
     n_sensx = 2448  # number of fpa pixels, x
@@ -52,7 +60,9 @@ def light_prop_gen():
     eff = 0.53  # quantum efficiency
     temp = 300  # temperature (K)
     cap = 1e-12  # circuit capacitance (F)
-    i_dark = 9.4 * qe
+
+    # experiment variables
+    frames = 10
 
     # create source field
     field_s1, xc_s1, scene_info = source_field(n_s1, x_s1, zo, lum_max)
@@ -61,8 +71,8 @@ def light_prop_gen():
     field_r1, xr1_crd, phsc_r1 = rayleigh_sommerfeld_prop(field_s1, lam, zo, xc_s1, n_r1, x_r1, 0, 0)
 
     # add atmospheric phase noise to the recieve plane
-    screen, zern_phs = zern_phase_scrn(ro, outer_d, n_r1, zern_mx, xr1_crd, windx, windy, boil, del_t)
-    field_r1_atm = field_r1 * np.exp(1j * 2 * np.pi * (lam * c) * scrn_scale_fac * screen)
+    atm_phs, screens, zern_phs = zern_phase_scrn(ro, outer_d, n_r1, zern_mx, xr1_crd, windx, windy, boil, del_t, frames)
+    field_r1_atm = field_r1 * np.exp(-1j * 2 * np.pi * (lam * c) * scrn_scale_fac * atm_phs)
 
     # add a mask depicting the telescope front-end
     mask_n = n_r1
@@ -71,7 +81,7 @@ def light_prop_gen():
     field_s2 = field_r1_atm * mask1
 
     # skip over barrel propagation if too slow
-    if False:
+    if barrel_prop_flag:
         # propagate field from front of the telescope to the lense
         z1 = 610e-3  # propagation distance through telescope
         xms2, yms2 = np.meshgrid(xr1_crd, xr1_crd)
@@ -95,11 +105,11 @@ def light_prop_gen():
     # add detector noise from circuit and scene
     thermal = np.sqrt(kb * temp * cap / qe ** 2)  # thermal noise
     data_signal = (data_sampled * (pix_sz ** 2) * del_t) / (h * c / lam)  # field (V/m^2) to photons
-    background = lum_max * del_t / (h * c / lam)   # background noise
+    background = back_lum_mean * del_t / (h * c / lam)   # background noise
 
     thermal_rv = np.random.normal(0, thermal, size=[n_sensy, n_sensx])
     data_signal_rv = np.random.poisson(eff * data_signal)
-    background_rv = np.random.poisson(eff * background, size=[n_sensy, n_sensx])*500
+    background_rv = np.random.poisson(eff * background, size=[n_sensy, n_sensx]) * 500
 
     data_noisey = data_signal_rv + thermal_rv + background_rv
 
@@ -109,29 +119,33 @@ def light_prop_gen():
     # save off data when true
     data = partition_image(data_noisey, n_sensx, n_sensy, np.max(xr4_crd) / sens_w, np.max(xr4_crd) / sens_h)
     labels = scene_info
-    if True:
+    if save_flag:
         save_file('light_prop_data_array.npy', data)
         save_file('light_prop_label_array.npy', labels[:, 0])
 
     # plot final propagation when true
-    if False:
-        plt.subplot(121)
+    if plot_flag:
+        plt.subplot(231)
         plt.imshow(field_s1)
         plt.title('original')
         plt.axis('off')
-        plt.subplot(243)
+        plt.subplot(234)
+        plt.imshow(zern_phs * scrn_scale_fac)
+        plt.title('atmosphere')
+        plt.axis('off')
+        plt.subplot(232)
         plt.imshow(data[0])
         plt.title('n:%1.0f, %1.1f, %1.1f' % (labels[0, 0], labels[0, 1]/lum_max, labels[0, 2]/lum_max))
         plt.axis('off')
-        plt.subplot(244)
+        plt.subplot(233)
         plt.imshow(data[1])
         plt.title('n:%1.0f, %1.1f, %1.1f' % (labels[1, 0], labels[1, 1]/lum_max, labels[1, 2]/lum_max))
         plt.axis('off')
-        plt.subplot(247)
+        plt.subplot(235)
         plt.imshow(data[2])
         plt.title('n:%1.0f, %1.1f, %1.1f' % (labels[2, 0], labels[2, 1]/lum_max, labels[2, 2]/lum_max))
         plt.axis('off')
-        plt.subplot(248)
+        plt.subplot(236)
         plt.imshow(data[3])
         plt.title('n:%1.0f, %1.1f, %1.1f' % (labels[3, 0], labels[3, 1]/lum_max, labels[3, 2]/lum_max))
         plt.axis('off')
@@ -144,7 +158,7 @@ def light_prop_gen():
 # space objects desired for detection
 def source_field(n, sz, z, lu):
     x = np.arange(-sz / 2, sz / 2 + (sz / n), sz / (n))
-    xm, ym = np.meshgrid(x, x)
+    # xm, ym = np.meshgrid(x, x)
     field_s = np.zeros((n + 1, n + 1))
 
     lumin = np.random.uniform(lu/10, lu, size=(2, 2, 2))
@@ -167,7 +181,7 @@ def source_field(n, sz, z, lu):
     return field_s, x, scene_info
 
 
-# 11" (28cm) circle with 3.75" (9.5cm) center circle missing
+# circle center circle masking, simulating a subreflector
 def circ_mask(n, sz, outer_d, inner_d):
     x = np.arange(-sz / 2, sz / 2 + (sz / n), sz / n)
     xm, ym = np.meshgrid(x, x)
@@ -196,7 +210,9 @@ def sq_mask(n, sz, x_diam, y_diam):
 # resample to focal plane array
 def sample(field_s, xs_crd, sampx, sampy):
     # determine magnitude of source field
-    field_s_mag = np.sqrt(np.real(field_s) ** 2 + np.imag(field_s) ** 2)
+    field_s_mag = np.sqrt(field_s.real**2 + field_s.imag**2)
+    # field_s_mag = np.abs(field_s @ field_s.conj().T)
+
     field_rs = itrp.interp2d(xs_crd, xs_crd, field_s_mag, kind='linear')
     # field_rs2 = itrp.RectBivariateSpline(xs_crd, xs_crd, field_s_mag)
 
@@ -205,9 +221,8 @@ def sample(field_s, xs_crd, sampx, sampy):
 
 
 # create phase screen from zernike polynomials
-def zern_phase_scrn(ro, d, nn, zern_mx, x_crd, windx, windy, boil, deltat):
+def zern_phase_scrn(ro, d, nn, zern_mx, x_crd, windx, windy, boil, deltat, frames):
     k = 2.2698
-    a = 6.88
 
     # create zernicke
     zern, idx = zern_poly(zern_mx + 1, nn)
@@ -215,73 +230,109 @@ def zern_phase_scrn(ro, d, nn, zern_mx, x_crd, windx, windy, boil, deltat):
 
     # transfer indices
     n = idx[:, 0]
-    n_p = n
     m = idx[:, 1]
-    m_p = m
     p = idx[:, 2]
-    p_p = p
 
     # calculate covariance matrix
     covar = np.zeros((zern_mx, zern_mx))
     for xx in np.arange(0, zern_mx):
         for yy in np.arange(0, zern_mx):
-            test1 = m[xx] == m_p[yy]
+            test1 = m[xx] == m[yy]
             test2 = m[xx] == 0
             temp_frac = (p[xx] / 2) / np.ceil(p[xx] / 2)
             p_even = temp_frac == 1
-            temp_frac = (p_p[yy] / 2) / np.ceil(p_p[yy] / 2)
+            temp_frac = (p[yy] / 2) / np.ceil(p[yy] / 2)
             p_p_even = temp_frac == 1
             test3 = p_even == p_p_even
             test0 = test2 | test3
             if test1 and test0:
-                k_zz = k * np.power(-1, (n[xx] + n_p[yy] - (2 * m[xx])) / 2) * np.sqrt((n[xx] + 1) * (n_p[xx] + 1))
-                num = k_zz * math.gamma((n[xx] + n_p[yy] - (5 / 3)) / 2) * np.power(d / ro, 5 / 3)
-                dnm = math.gamma((n[xx] - n_p[yy] + 17 / 3) / 2) * math.gamma((n_p[yy] - n[xx] + 17 / 3) / 2) * \
-                      math.gamma((n[xx] + n_p[yy] + 23 / 3) / 2)
+                k_zz = k * np.power(-1, (n[xx] + n[yy] - (2 * m[xx])) / 2) * np.sqrt((n[xx] + 1) * (n[xx] + 1))
+                num = k_zz * math.gamma((n[xx] + n[yy] - (5 / 3)) / 2) * np.power(d / ro, 5 / 3)
+                dnm = math.gamma((n[xx] - n[yy] + 17 / 3) / 2) * math.gamma((n[yy] - n[xx] + 17 / 3) / 2) * \
+                      math.gamma((n[xx] + n[yy] + 23 / 3) / 2)
                 covar[xx, yy] = num / dnm
 
     # factorize covariance matrix using cholesky
     covar = covar[1:zern_mx, 1:zern_mx]
     ch = la.cholesky(covar)
+
+    # generate phase screen directly from zernike poly
+    zern_phs = general_phase_screen(nn, zern_mx, zern, ch)
+
+    # generate phase screen using atmospheric vars
+    atm_lens_phs, screens = atmos_phase_screen(nn, ro, x_crd, windx, windy, boil, deltat, zern_mx, zern, ch, frames)
+
+    print('zern scrn')
+    return atm_lens_phs, screens, zern_phs
+
+
+def general_phase_screen(nn, zern_mx, zern, ch):
     rn = np.random.normal(size=(zern_mx - 1, 1))
     z_cf = np.matmul(ch, rn)
     zern_phs = np.zeros((nn + 1, nn + 1))
+
     for ii in np.arange(0, zern_mx - 1):
         zern_phs = zern_phs + z_cf[ii] * zern[ii, :, :]
 
+    return zern_phs
+
+
+def atmos_phase_screen(nn, ro, x_crd, windx, windy, boil, deltat, zern_mx, zern, ch, frames):
+    a = 6.88
+
     # get phase structure
-    xm, ym = np.meshgrid(x_crd, x_crd)
+    xm, ym = np.meshgrid(x_crd, x_crd)  # tau_x, tau_y
     phs_struct = a * (((ym + (windy + boil) * deltat) ** 2 + (xm + (windx + boil) * deltat) ** 2) ** (5 / 6) -
                       (xm ** 2 + ym ** 2) ** (5 / 6)) / ro ** (5 / 3)
 
-    # inner double sum integral
-    fft_mat = np.zeros((nn + 1, nn + 1, zern_mx - 1)) + 0j
-    for jj in np.arange(0, zern_mx - 1):
-        fft_mat[:, :, jj] = np.fft.fft2(np.fft.fftshift(zern[jj, :, :]))
-
-    # denominator
+    # denominator, Zernike sum of squares
     dnm = np.zeros((zern_mx - 1))
     for xx in np.arange(0, zern_mx - 1):
         dnm[xx] = np.sum(np.sum(zern[xx, :, :] ** 2))
 
+    # FFT of all zernikes
+    fft_mat = np.zeros((nn + 1, nn + 1, zern_mx - 1)) + 0j
+    for jj in np.arange(0, zern_mx - 1):
+        fft_mat[:, :, jj] = np.fft.fft2(np.fft.fftshift(zern[jj, :, :]))
+
     # inner double sum integral
-    idsi = np.zeros((zern_mx - 1, zern_mx - 1)) + 0j
+    idsi = np.zeros((zern_mx - 1, zern_mx - 1))
     for xx in np.arange(0, zern_mx - 1):
         for yy in np.arange(0, zern_mx - 1):
-            idsi[xx, yy] = np.sum(
-                np.sum(np.fft.fftshift(np.fft.ifft2(fft_mat[:, :, xx] * np.conjugate(fft_mat[:, :, yy])))
-                       * phs_struct / (dnm[xx] * dnm[yy])))
+            xcorr_fft = np.real(np.fft.fftshift(np.fft.ifft2(fft_mat[:, :, xx] * fft_mat[:, :, yy].conj())))
+            idsi[xx, yy] = np.sum(np.sum(xcorr_fft * phs_struct / (dnm[xx] * dnm[yy])))
+            # xcorr = signal.correlate2d(zern[xx, :, :], zern[yy, :, :])  # check xcorr results
+            # idsi[xx, yy] = np.sum(np.sum(xcorr * phs_struct / (dnm[xx] * dnm[yy])))
 
-    # generate screen
-    rn2 = np.random.normal(size=(zern_mx - 1, 1))
+    # get n structure function from the phase structure function differences
+    phi = la.inv(ch)
+    dn = np.zeros(zern_mx-1)
+    for ii in range(0, zern_mx-1):
+        temp = phi[ii, :] * phi[ii, :]
+        dn[ii] = np.sum(np.sum(idsi * temp))
 
-    atm_lens_phs2 = np.zeros((nn + 1, nn + 1))
-    z_scale = np.matmul(ch, rn2)
-    for jj in np.arange(0, zern_mx - 1):
-        atm_lens_phs2 = atm_lens_phs2 + (z_scale[jj] * zern[jj, :, :])
+    # get the n-vector, and correlation functions
+    r_0 = 1
+    r_n = r_0 - dn/2
+    r_n = np.clip(r_n, a_min=0, a_max=None)
+    n_vec = np.random.normal(size=(zern_mx - 1))
+    cond_var = np.abs(1 - r_n**2)
 
-    print('zern scrn')
-    return atm_lens_phs2, zern_phs
+    # generate screens from statistics
+    atm_lens_phs = np.zeros((nn + 1, nn + 1))
+    z_record = np.zeros((zern_mx-1, frames))
+    screens = np.zeros((nn+1, nn+1, frames))
+    for ii in range(0, frames):
+        atm_lens_phs = np.zeros((nn + 1, nn + 1))
+        z_scale = ch @ n_vec
+        z_record[:, ii] = np.squeeze(z_scale)
+        for jj in np.arange(0, zern_mx - 1):
+            atm_lens_phs = atm_lens_phs + (z_scale[jj] * zern[jj, :, :])
+        screens[:, :, ii] = atm_lens_phs
+        cond_mean = n_vec * r_n
+        n_vec = np.sqrt(cond_var) * np.random.normal(size=(zern_mx-1)) + cond_mean
+
+    return atm_lens_phs, screens
 
 
 # create zernike polynomials
