@@ -6,14 +6,16 @@ import scipy.linalg as la
 from scipy import signal
 import csv
 import time
+import os
+import uuid
 
 from matplotlib.animation import FuncAnimation, PillowWriter
 
 
 def light_prop_gen(nn, d, zern_mx, ro, zern, ch):
     # code flags
-    save_flag = False
-    plot_flag = True
+    save_flag = True
+    plot_flag = False
     barrel_prop_flag = False
 
     # vars constant between simulations
@@ -35,7 +37,7 @@ def light_prop_gen(nn, d, zern_mx, ro, zern, ch):
     del_t = .005  # exposure time
     intensity_max = 1e-5  # max target intensity (W/m^2)
     lum_max = intensity_max * del_t  # V/m^2 or Ws/m^2
-    back_lum_mean = lum_max/10  # mean background luminosity
+    back_lum_mean = lum_max/16  # mean background luminosity
 
     # optic information
     fl = 2.8  # focal length (m)
@@ -61,7 +63,7 @@ def light_prop_gen(nn, d, zern_mx, ro, zern, ch):
     cap = 1e-12  # circuit capacitance (F)
 
     # experiment variables
-    frames = 16
+    frames = 32
 
     # create source field
     field_s1, xc_s1, scene_info = source_field(n_s1, x_s1, zo, lum_max)
@@ -132,9 +134,9 @@ def light_prop_gen(nn, d, zern_mx, ro, zern, ch):
     data = partition_image(data_noisey, n_sensx, n_sensy, np.max(xr4_crd) / sens_w, np.max(xr4_crd) / sens_h, frames)
 
     labels = scene_info
+    path = './gen_data'
     if save_flag:
-        save_file('./data/light_prop_data_array.npy', data)
-        save_file('./data/light_prop_label_array.npy', labels[:, 0])
+        save_file(path, data, labels)
 
     # plot final propagation when true, can access as gif in folder
     if plot_flag:
@@ -167,6 +169,7 @@ def source_field(n, sz, z, lu):
                 field_s[int(((3**ii) * n) / 4), int(((3**jj) * n) / 4) + 1] = lumin[ii, jj, 1]
 
     scene_info = np.concatenate((num_obj.reshape(4, 1), lumin.reshape(4, 2)), 1)
+    print('source field gend')
     return field_s, x, scene_info
 
 
@@ -216,17 +219,25 @@ def detection_noise(data, n_x, n_y, eff, lam, del_t, back_mean, px_sz, temp, cap
     qe = 1.6022e-19  # elementary charge
     kb = 1.38065e-34  # boltzmann's constant
 
+    y_hi = int(n_x * (9.0 / 16.0))
+    y_lo = int(n_x * (7.0 / 16.0))
+    x_hi = int(n_y * (7.0 / 12.0))
+    x_lo = int(n_y * (5.0 / 12.0))
+
     # add detector noise from circuit and scene
     thermal = np.sqrt(kb * temp * cap / qe ** 2)  # thermal noise
     data_signal = (data * (px_sz ** 2) * del_t) / (h * c / lam)  # field (I/m^2) to photons
     background = back_mean * del_t / (h * c / lam)  # background noise
 
-    thermal_rv = np.random.normal(0, thermal, size=[n_y, n_x])
-    data_signal_rv = np.random.poisson(eff * data_signal)
-    background_rv = np.random.poisson(eff * background, size=[n_y, n_x]) * 1e5
+    # only make portion of interest random to speed up simulation
+    thermal_rv = np.random.normal(0, thermal, size=[int(n_y/6), int(n_x/8)])
+    data_signal_rv = data_signal
+    data_signal_rv[x_lo:x_hi,y_lo:y_hi] = np.random.poisson(eff * data_signal[x_lo:x_hi,y_lo:y_hi])
+    background_rv = np.random.poisson(eff * background, size=[int(n_y/6), int(n_x/8)]) * 1e5
 
     print('added noise')
-    return data_signal_rv + thermal_rv + background_rv
+    data_signal_rv[x_lo:x_hi,y_lo:y_hi] = data_signal_rv[x_lo:x_hi,y_lo:y_hi] + thermal_rv + background_rv
+    return data_signal_rv
 
 
 # create phase screen from zernike polynomials
@@ -386,6 +397,7 @@ def zern_poly(i_mx, num_pts):
     thm = np.arctan2(ym, xm)
 
     zern_idx = zern_indexes()
+
     if i_mx > 1000: print('error: too many zernike polynomials requests')
     zern_idx = zern_idx[0:i_mx - 1, :]
 
@@ -407,18 +419,24 @@ def zern_poly(i_mx, num_pts):
     return zern, zern_idx
 
 
-# generate indices from csv file
-def zern_indexes():
-    raw = csv.DictReader(open('zern_idx.csv'))
+# pull zernike indices from csv file, defaults to zern_idx.csv
+def zern_indexes(filename: str = 'zern_idx.csv'):
+    # read in csv file and convert to list
+    raw = csv.DictReader(open(filename))
     raw_list = list(raw)
+
+    # initialize z array
     r = 1000  # number of indixes in zern.csv file
-    c = 3
+    c = 3  # x, y, i
     z = np.zeros((r, c))
+
+    # get 'x' and 'y' column values as index 'i'
     for row in np.arange(0, r):
         row_vals = raw_list[row]
         z[row, 0] = float(row_vals['x'])
         z[row, 1] = float(row_vals['y'])
         z[row, 2] = float(row_vals['i'])
+
     return z
 
 
@@ -546,7 +564,7 @@ def partition_image(images, nx, ny, rx, ry, frames):
         temp3[ii, :, :] = images[ii, ypart[0]:ypart[1], xpart[1]:xpart[2]]
         temp4[ii, :, :] = images[ii, ypart[0]:ypart[1], xpart[0]:xpart[1]]
 
-    im_parts = [temp1, temp2, temp3, temp4]
+    im_parts = np.asarray([temp1, temp2, temp3, temp4])
     print('partitioned image')
     return im_parts
 
@@ -554,6 +572,11 @@ def partition_image(images, nx, ny, rx, ry, frames):
 # create animated gif of the data to show the effects of atmosphere over time
 def animate_results(field_s1, screens, data, labels, frames):
     fig, ax = plt.subplots(2, 3)
+    for ii in range(4):
+        data_min = np.min(np.min(data[ii]))
+        data_max = np.max(np.max(data[ii]))
+        data[ii] = (data[ii] - data_min) / (data_max - data_min) * 255
+        data[ii] = data[ii].astype(dtype='uint8')
 
     def AnimationFunction(f):
         ax[0, 0].imshow(field_s1)
@@ -581,13 +604,14 @@ def animate_results(field_s1, screens, data, labels, frames):
 
 
 # save data to file for later use
-def save_file(filename, data):
-    import os
-    if os.path.isfile(filename):
-        d_handle = np.load(filename, allow_pickle=True)
-        np.save(filename, np.append(d_handle, data))
-    else:
-        np.save(filename, data)
+def save_file(path, data, labels):
+    # convert images to bytes then saves (frames, 140px, 146px)
+    for ii in range(4):
+        data_min = np.min(np.min(data[ii]))
+        data_max = np.max(np.max(data[ii]))
+        data[ii] = (data[ii] - data_min) / (data_max - data_min) * 255
+        d = data[ii].astype('uint8')
+        np.save(file=path+'/'+str(int(labels[ii, 0]))+'/'+str(uuid.uuid4()), arr=d)
 
     print('saved data')
 
@@ -598,10 +622,12 @@ if __name__ == '__main__':
     nn = 120  # number of samples along 1D receive plane
     d = 0.28  # diameter of telescope
     ro = 0.07  # fried seeing parameter
+    runs = 400
 
     # create zernike polynomials for use in atmospheric model
     zern, ch = generate_zern_polys(zern_mx, nn, d, ro)
 
     # loop through the data generation function
-    for i in range(1):
+    for ii in range(runs):
         light_prop_gen(nn, d, zern_mx, ro, zern, ch)
+        print(f'SIM NUM: {ii}')
