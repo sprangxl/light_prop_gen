@@ -41,7 +41,8 @@ def light_prop_est():
 
     # deconvolution thread
     processes = 12
-    n = processes * 20  # only use subsection of data
+    proc_groups = 20
+    n = processes * proc_groups  # only use subsection of data
     obj_est = np.zeros((n, nn, nn))
     img_est = np.zeros((n, nn, nn, frames))
     otf_est = np.zeros((n, nn, nn, frames)) + 0j
@@ -50,12 +51,12 @@ def light_prop_est():
         print(f'Data: {num}/{n}, Thread: {proc}/{processes}')
 
     # create threads
-    for p in range(int(n/processes)):
+    for p in range(proc_groups):
         # create a thread/process per different source and run/start
         threads = []
         for pp in range(processes):
             data = np.load(files[p])
-            process = Thread(target=deconv_thread, args=[pp, data, (p * 8 + pp)])
+            process = Thread(target=deconv_thread, args=[pp, data, (p * processes + pp)])
             process.start()
             threads.append(process)
 
