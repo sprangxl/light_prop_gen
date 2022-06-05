@@ -48,14 +48,14 @@ def light_prop_est():
     otf_est = np.zeros((n, nn, nn, frames)) + 0j
     def deconv_thread(proc, data, num):
         obj_est[num, :, :], img_est[num, :, :, :], otf_est[num, :, :, :] = estimate(data, z4, its, gs_its, f'Im {num}')
-        print(f'Data: {num}/{n}, Thread: {proc}/{processes}')
+        print(f'Data: {num + 1}/{n}, Thread: {proc + 1}/{processes}')
 
     # create threads
     for p in range(proc_groups):
         # create a thread/process per different source and run/start
         threads = []
         for pp in range(processes):
-            data = np.load(files[p])
+            data = np.load(files[(p * processes + pp)])
             process = Thread(target=deconv_thread, args=[pp, data, (p * processes + pp)])
             process.start()
             threads.append(process)

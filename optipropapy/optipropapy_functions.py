@@ -160,6 +160,7 @@ def circ_mask(n, sz, outer_d, inner_d):
 
     return mask
 
+
 # circle center circle masking, simulating a subreflector
 def circ_mask_shift(n, sz, outer_d, inner_d, x_shft, y_shft):
     # coordinates
@@ -176,7 +177,6 @@ def circ_mask_shift(n, sz, outer_d, inner_d, x_shft, y_shft):
     mask[(xm ** 2 + ym ** 2) < (inner_d / 2) ** 2] = 0
 
     return mask
-
 
 
 # account for the points measured at focal plane array

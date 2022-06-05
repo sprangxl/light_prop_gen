@@ -8,8 +8,8 @@ from datetime import date
 
 
 def main():
-    #est_viewer()
-    gen_viewer()
+    est_viewer()
+    #gen_viewer()
     print('done')
 
 def gen_viewer():
@@ -40,9 +40,9 @@ def gen_viewer():
     data = np.zeros((samples, frames, sz, sz))
 
     for ii in range(samples):
-        data[ii, :, :, :] = np.load(files[p])
+        data[ii, :, :, :] = np.load(files[ii])
         fig, ax = plt.subplots(1, 1)
-        ax.imshow(data[ii, :, :, :])
+        ax.imshow(data[ii, 0, :, :])
         plt.suptitle(f'Truth: {truth[ii]}')
         plt.show()
 
@@ -50,7 +50,7 @@ def gen_viewer():
 
 
 def est_viewer():
-    instance = '2022-06-03_864'
+    instance = '2022-06-05_108'
     samples = 4
 
     # variables to access data
