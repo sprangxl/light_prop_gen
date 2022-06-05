@@ -41,7 +41,7 @@ def light_prop_est():
 
     # deconvolution thread
     processes = 12
-    proc_groups = 20
+    proc_groups = 2
     n = processes * proc_groups  # only use subsection of data
     obj_est = np.zeros((n, nn, nn))
     img_est = np.zeros((n, nn, nn, frames))
