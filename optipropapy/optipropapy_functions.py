@@ -684,7 +684,9 @@ def maxlikelihood_deconvolution2(nn, frames, data, defocus, its, gs_its, name):
     ap_est = np.fft.fftshift(ap_est)
     phs_est = np.array(defocus)
     psf_est, otf_est = convert_to_psf_otf(ap_est * np.exp(1j * phs_est))  # initial psf and otf estimates
-    obj_est = np.ones((nn, nn))
+    obj_est = circ_mask(nn, nn, 4, 0)
+    obj_est2 = circ_mask(nn, nn, 50, 6)
+    obj_est = np.fft.fftshift(obj_est + obj_est2)
 
     psf_est = np.repeat(np.expand_dims(psf_est, 2), frames, axis=2)
     otf_est = np.repeat(np.expand_dims(otf_est, 2), frames, axis=2)

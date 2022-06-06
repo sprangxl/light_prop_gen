@@ -8,7 +8,7 @@ from datetime import date
 
 
 def light_prop_det():
-    instance = '2022-06-03_864'
+    instance = '2022-06-06_225'
 
     # variables to access data
     base_data_dir = Path('gen_data')
@@ -28,7 +28,7 @@ def light_prop_det():
     print(f'Runs: {runs}, Truth: {truth.dtype}')
 
     # check to make sure referencing data correctly
-    if True:
+    if False:
         for rr in range(runs):
             fig, ax = plt.subplots(1, 2)
             ax[0].imshow(np.fft.fftshift(obj_est[rr, :, :]))
@@ -37,8 +37,8 @@ def light_prop_det():
             plt.show()
 
     # detect
-    divs = 100
-    thresh = np.linspace(0, 1, divs)
+    divs = 1000
+    thresh = np.linspace(00, 1, divs)
     det = np.ones((runs, divs))
     dfa = np.zeros((2, divs))
     p2_ratio = np.zeros(runs)
@@ -46,15 +46,34 @@ def light_prop_det():
     xm, ym = np.meshgrid(x, x)
     for rr in range(runs):
         # get center of object
-        cx = np.sum(obj_est[rr, :, :] * xm) / np.sum(obj_est[rr, :, :])
-        cy = np.sum(obj_est[rr, :, :] * ym) / np.sum(obj_est[rr, :, :])
+        if False:
+            # centroid
+            cx = np.sum(np.fft.fftshift(obj_est[rr, :, :]) * xm) / np.sum(np.fft.fftshift(obj_est[rr, :, :]))
+            cy = np.sum(np.fft.fftshift(obj_est[rr, :, :]) * ym) / np.sum(np.fft.fftshift(obj_est[rr, :, :]))
+        elif True:
+            # max value
+            cx = np.argmax(np.max(np.fft.fftshift(obj_est[rr, :, :]), 0), 0)
+            cy = np.argmax(np.max(np.fft.fftshift(obj_est[rr, :, :]), 1), 0)
+        else:
+            # center
+            cx = 50
+            cy = 50
+
 
         # create detection areas
-        outer = opp.circ_mask_shift(100, 100, 50, 3, -(cx - 50), -(cy - 50))
-        inner = opp.circ_mask_shift(100, 100, 3, 0, -(cx - 50), -(cy - 50))
+        outer = opp.circ_mask_shift(100, 100, 50, 3, (cx - 50), (cy - 50))
+        inner = opp.circ_mask_shift(100, 100, 3, 0, (cx - 50), (cy - 50))
 
-        p2 = np.sum(outer * np.fft.fftshift(obj_est[0, :, :]))
-        p1 = np.sum(inner * np.fft.fftshift(obj_est[0, :, :]))
+        # view detection masking areas
+        if False:
+            fig, ax = plt.subplots(1, 3)
+            ax[0].imshow(outer)
+            ax[1].imshow(inner)
+            ax[2].imshow(np.fft.fftshift(obj_est[rr, :, :]))
+            plt.show()
+
+        p2 = np.sum(outer * np.fft.fftshift(obj_est[rr, :, :]))
+        p1 = np.sum(inner * np.fft.fftshift(obj_est[rr, :, :]))
         p2_ratio[rr] = p2 / (p1 + p2)
 
     for tt in range(divs):
@@ -67,28 +86,22 @@ def light_prop_det():
                     detection = detection + 1
                 if truth[rr] == 1:
                     false_alarm = false_alarm + 1
-        print(f'FA: {false_alarm/runs}, D: {detection/runs}')
-        dfa[0, tt] = false_alarm / runs
-        dfa[1, tt] = detection / runs
+        #print(f'FA: {false_alarm/runs}, D: {detection/runs}')
+        dfa[0, tt] = false_alarm / np.sum(truth==1)
+        dfa[1, tt] = detection / np.sum(truth==2)
         print(f'Div: {tt}/{divs}')
 
     # plot ROC and Pfa & Pd distributions
     if True:
-        fig, ax = plt.subplots(1, 3)
-        ax[0].plot(dfa[0, tt], dfa[1, tt])
-        ax[1].plot(dfa[0, tt])
-        ax[1].plot(dfa[1, tt])
-        ax[2].plot(p2_ratio)
+        fig, ax = plt.subplots(1, 2)
+        ax[0].plot(dfa[0, :], dfa[1, :])
+        ax[0].plot([0, 1], [0, 1])
+        ax[1].plot(thresh, dfa[0, :])
+        ax[1].plot(thresh, dfa[1, :])
+        ax[1].legend(['False Alarm', 'Detection'])
         plt.show()
 
     print(f'P1: {p1}, P2: {p2}')
-
-    # view detection masking areas
-    if False:
-        fig, ax = plt.subplots(1, 2)
-        ax[0].imshow(outer)
-        ax[1].imshow(inner)
-        plt.show()
 
     print('done')
 

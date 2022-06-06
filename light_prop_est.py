@@ -32,7 +32,7 @@ def light_prop_est():
     # get some needed variables
     nn = 100
     zern_mx = 4
-    its = 200
+    its = 150
     gs_its = 20
     frames = 32
     zern, ch = opp.generate_zern_polys(zern_mx, int(nn/2), 0.5, 0.05)
@@ -41,7 +41,7 @@ def light_prop_est():
 
     # deconvolution thread
     processes = 12
-    proc_groups = 2
+    proc_groups = 30
     n = processes * proc_groups  # only use subsection of data
     obj_est = np.zeros((n, nn, nn))
     img_est = np.zeros((n, nn, nn, frames))

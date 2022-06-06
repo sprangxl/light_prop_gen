@@ -50,8 +50,8 @@ def gen_viewer():
 
 
 def est_viewer():
-    instance = '2022-06-05_108'
-    samples = 4
+    instance = '2022-06-06_225'
+    samples = 12
 
     # variables to access data
     base_data_dir = Path('gen_data')
