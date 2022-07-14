@@ -44,6 +44,7 @@ def light_prop_det():
     p2_ratio = np.zeros(runs)
     x = np.linspace(0, 99, 100)
     xm, ym = np.meshgrid(x, x)
+    det_ar = 3
     for rr in range(runs):
         # get center of object
         if False:
@@ -61,8 +62,8 @@ def light_prop_det():
 
 
         # create detection areas
-        outer = opp.circ_mask_shift(100, 100, 50, 3, (cx - 50), (cy - 50))
-        inner = opp.circ_mask_shift(100, 100, 3, 0, (cx - 50), (cy - 50))
+        outer = opp.circ_mask_shift(100, 100, 50, det_ar, (cx - 50), (cy - 50))
+        inner = opp.circ_mask_shift(100, 100, det_ar, 0, (cx - 50), (cy - 50))
 
         # view detection masking areas
         if False:
@@ -86,7 +87,6 @@ def light_prop_det():
                     detection = detection + 1
                 if truth[rr] == 1:
                     false_alarm = false_alarm + 1
-        #print(f'FA: {false_alarm/runs}, D: {detection/runs}')
         dfa[0, tt] = false_alarm / np.sum(truth==1)
         dfa[1, tt] = detection / np.sum(truth==2)
         print(f'Div: {tt}/{divs}')
@@ -97,6 +97,7 @@ def light_prop_det():
         ax[0].plot(dfa[0, :], dfa[1, :])
         ax[0].plot([0, 1], [0, 1])
         ax[0].set(xlabel='P-False', ylabel='P-Detect')
+        ax[0].legend(['EM', '50-50'])
         ax[1].plot(thresh, dfa[1, :])
         ax[1].plot(thresh, dfa[0, :])
         ax[1].legend(['Detection', 'False Alarm'])
